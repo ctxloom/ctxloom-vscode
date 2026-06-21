@@ -1,0 +1,58 @@
+{
+  "name": "ctxloom",
+  "displayName": "ctxloom",
+  "description": "VSCode companion for ctxloom — launch agents, browse sessions, manage context. A frontend to the same ctxloom backend as the CLI.",
+  "version": "0.0.1",
+  "publisher": "ctxloom",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "ctxloom.run",
+        "title": "ctxloom: Run Agent"
+      },
+      {
+        "command": "ctxloom.checkCompanions",
+        "title": "ctxloom: Check Companions (taskloom, ltk)"
+      }
+    ],
+    "configuration": {
+      "title": "ctxloom",
+      "properties": {
+        "ctxloom.binaryPath": {
+          "type": "string",
+          "default": "ctxloom",
+          "description": "Path to the ctxloom binary. Defaults to 'ctxloom' on PATH."
+        },
+        "ctxloom.runProfile": {
+          "type": "string",
+          "default": "",
+          "description": "Profile passed to 'ctxloom run' via -p. Empty uses the project's configured default profiles."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^20.x",
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.21.0",
+    "typescript": "^5.4.0"
+  }
+}
