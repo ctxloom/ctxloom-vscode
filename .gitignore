@@ -2,3 +2,12 @@ node_modules/
 dist/
 *.vsix
 .vscode-test/
+
+# ctxloom private working state (synced bundles, session/context, project id)
+*.ctxloom.bak
+.agents/
+.codex/config.toml
+
+# ctxloom private working state (synced bundles, session/context, project id)
+.ctxloom/ephemeral/
+.ctxloom/project-id
