@@ -1,15 +1,25 @@
-import { execFile } from "node:child_process";
+import {
+  execFile,
+  spawn,
+  type ChildProcessWithoutNullStreams,
+} from "node:child_process";
 import { promisify } from "node:util";
 import * as vscode from "vscode";
 
 const execFileAsync = promisify(execFile);
 
-/** Resolves the configured ctxloom binary (defaults to `ctxloom` on PATH). */
+/**
+ * Resolves the configured ctxloom binary (defaults to `ctxloom` on PATH). The
+ * value is trimmed: a stray trailing space/newline (easy to introduce when
+ * pasting an absolute path into settings) would otherwise make spawn fail with a
+ * confusing ENOENT on a path that visibly looks correct.
+ */
 export function binaryPath(): string {
   const configured = vscode.workspace
     .getConfiguration("ctxloom")
-    .get<string>("binaryPath");
-  return configured && configured.trim() !== "" ? configured : "ctxloom";
+    .get<string>("binaryPath")
+    ?.trim();
+  return configured ? configured : "ctxloom";
 }
 
 /** The first workspace folder's path, or undefined when no folder is open. */
@@ -32,6 +42,20 @@ export async function exec(args: string[]): Promise<ExecResult> {
     cwd: workspaceDir(),
   });
   return { stdout, stderr };
+}
+
+/**
+ * Spawns a long-lived ctxloom subprocess with piped stdio for streaming, used by
+ * the chat webview to drive `run --structured --format json`: it writes user
+ * messages to stdin and reads the NDJSON turn stream from stdout. Unlike exec
+ * (buffered, one-shot) this stays open for the session's lifetime; unlike
+ * runInTerminal it captures stdio rather than rendering a TUI.
+ */
+export function spawnStreaming(args: string[]): ChildProcessWithoutNullStreams {
+  return spawn(binaryPath(), args, {
+    cwd: workspaceDir(),
+    stdio: ["pipe", "pipe", "pipe"],
+  });
 }
 
 /**

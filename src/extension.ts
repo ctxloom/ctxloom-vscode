@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { ChatSession } from "./chat";
 import { checkCompanions, checkCompanionsOnStartup } from "./companions";
 import { runAgent } from "./run";
 import { createStatusBar } from "./statusbar";
@@ -11,6 +12,9 @@ import { createStatusBar } from "./statusbar";
 export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand("ctxloom.run", runAgent),
+    vscode.commands.registerCommand("ctxloom.openChat", () =>
+      ChatSession.open(context),
+    ),
     vscode.commands.registerCommand("ctxloom.checkCompanions", checkCompanions),
     createStatusBar(),
   );

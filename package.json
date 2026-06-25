@@ -23,6 +23,10 @@
         "title": "ctxloom: Run Agent"
       },
       {
+        "command": "ctxloom.openChat",
+        "title": "ctxloom: Open Chat"
+      },
+      {
         "command": "ctxloom.checkCompanions",
         "title": "ctxloom: Check Companions (taskloom, ltk)"
       }
