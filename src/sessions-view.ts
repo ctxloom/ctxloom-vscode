@@ -15,12 +15,20 @@ const NOT_DISTILLED = "Not distilled yet — run Distill";
 export class SessionItem extends vscode.TreeItem {
   readonly harpName: string;
 
-  constructor(session: Session) {
+  constructor(session: Session, distilling = false) {
     super(session.harpName, vscode.TreeItemCollapsibleState.None);
     this.harpName = session.harpName;
     this.id = session.harpName;
-    this.description = describeTime(session.endedAt || session.startedAt);
     this.contextValue = "ctxloomSession";
+    if (distilling) {
+      // A spinning ring while `session distill` runs, so the (potentially slow)
+      // distillation is visibly in progress on the row itself.
+      this.description = "distilling…";
+      this.iconPath = new vscode.ThemeIcon("loading~spin");
+      this.tooltip = "Distilling…";
+      return;
+    }
+    this.description = describeTime(session.endedAt || session.startedAt);
     this.iconPath = new vscode.ThemeIcon("comment-discussion");
     // The full markdown essence is fetched lazily in resolveTreeItem; until then
     // a plain hint avoids a fetch per row on first render.
@@ -37,9 +45,22 @@ export class SessionItem extends vscode.TreeItem {
 export class SessionsProvider implements vscode.TreeDataProvider<SessionItem> {
   private readonly changed = new vscode.EventEmitter<SessionItem | undefined>();
   readonly onDidChangeTreeData = this.changed.event;
+  // Harp names currently being distilled, so their rows render a spinner. The
+  // distill command flips a name on/off and the toggle repaints the tree.
+  private readonly distilling = new Set<string>();
 
   /** Re-reads the session list. */
   refresh(): void {
+    this.changed.fire(undefined);
+  }
+
+  /** Marks a session as (not) distilling and repaints so its spinner toggles. */
+  setDistilling(harp: string, on: boolean): void {
+    if (on) {
+      this.distilling.add(harp);
+    } else {
+      this.distilling.delete(harp);
+    }
     this.changed.fire(undefined);
   }
 
@@ -57,7 +78,7 @@ export class SessionsProvider implements vscode.TreeDataProvider<SessionItem> {
       );
       return [];
     }
-    return sessions.map((s) => new SessionItem(s));
+    return sessions.map((s) => new SessionItem(s, this.distilling.has(s.harpName)));
   }
 
   /**
@@ -80,7 +101,9 @@ export class SessionsProvider implements vscode.TreeDataProvider<SessionItem> {
 /**
  * Registers the Sessions tree provider and its commands (refresh / resume /
  * distill / rename / forget). The action commands receive the selected
- * SessionItem; ones that mutate state refresh the view when they finish.
+ * SessionItem; ones that mutate state refresh the view when they finish. The
+ * shared not-a-Git-root warning (git-warning.ts) contributes the amber title-bar
+ * button via a context key.
  */
 export function registerSessionsView(context: vscode.ExtensionContext): void {
   const provider = new SessionsProvider();
@@ -112,15 +135,26 @@ export function registerSessionsView(context: vscode.ExtensionContext): void {
   );
 }
 
-/** Distills a session, then refreshes so its essence becomes available on hover. */
+/**
+ * Distills a session, showing progress on its row (a spinning ring) and in the
+ * window status bar while `session distill` runs. Clearing the distilling flag
+ * repaints the tree, so on success the fresh essence becomes available on hover.
+ */
 async function distill(provider: SessionsProvider, harp: string): Promise<void> {
+  provider.setDistilling(harp, true);
   try {
-    await exec(["session", "distill", harp]);
+    await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Window,
+        title: `ctxloom: distilling ${harp}…`,
+      },
+      () => exec(["session", "distill", harp]),
+    );
   } catch (err) {
     void vscode.window.showErrorMessage(`ctxloom: could not distill ${harp}: ${String(err)}`);
-    return;
+  } finally {
+    provider.setDistilling(harp, false);
   }
-  provider.refresh();
 }
 
 /** Prompts for a new harp name and renames the session, then refreshes. */
