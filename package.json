@@ -94,7 +94,7 @@
       },
       {
         "command": "ctxloom.gitWarning",
-        "title": "Not a Git repository root — sessions, plans, and tasks shown may be empty or from a parent project",
+        "title": "Not in a Git repository — sessions, plans, and tasks are keyed to this folder, not a stable repo root",
         "category": "ctxloom",
         "icon": "media/icons/warning-amber.svg"
       },
@@ -310,7 +310,7 @@
         },
         {
           "command": "ctxloom.gitWarning",
-          "when": "view == ctxloom.sessions && ctxloom.notGitRoot",
+          "when": "view == ctxloom.sessions && ctxloom.rootFallback",
           "group": "navigation@0"
         },
         {
@@ -330,7 +330,7 @@
         },
         {
           "command": "ctxloom.gitWarning",
-          "when": "view == ctxloom.plans && ctxloom.notGitRoot",
+          "when": "view == ctxloom.plans && ctxloom.rootFallback",
           "group": "navigation@0"
         },
         {
@@ -340,7 +340,7 @@
         },
         {
           "command": "ctxloom.gitWarning",
-          "when": "view == ctxloom.tasks && ctxloom.notGitRoot",
+          "when": "view == ctxloom.tasks && ctxloom.rootFallback",
           "group": "navigation@0"
         },
         {

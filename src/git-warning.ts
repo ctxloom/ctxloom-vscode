@@ -1,46 +1,55 @@
-import { existsSync } from "node:fs";
-import { join } from "node:path";
 import * as vscode from "vscode";
-import { workspaceDir } from "./cli";
+import { exec, workspaceDir } from "./cli";
 
-// The full explanation, shown as a toast when the title-bar warning is clicked.
-// ctxloom keys a project on its Git root, so a workspace opened on a sub-folder
-// (or a non-Git folder) can surface a parent project's data or none. The
-// "ctxloom:" prefix matches the backend's `ctxloom: warning: …` voice.
-const GIT_ROOT_WARNING =
-  "This folder isn't a Git repository root — sessions, plans, and tasks are " +
-  "scoped to the project (Git) root, so the ones shown here may be empty or " +
-  "belong to a parent project.";
+// Shown (as a toast) when ctxloom's project root falls back to the workspace
+// folder itself — no CTXLOOM_ROOT override and not inside a git repository — so
+// tasks, plans, and sessions are keyed to this exact path under ~/.ctxloom
+// rather than a stable repo root. The "ctxloom:" prefix matches the backend's
+// `ctxloom: warning: …` voice; the wording mirrors `ctxloom run`'s own warning.
+const ROOT_FALLBACK_WARNING =
+  "Not in a Git repository — this folder is itself the project root, so its " +
+  "sessions, plans, and tasks are keyed to this exact path under ~/.ctxloom. " +
+  "Re-open from a repo root (or set CTXLOOM_ROOT) to keep them stable.";
 
-/** True when `dir` is a Git working-tree root (a linked worktree's .git is a file). */
-function isGitRoot(dir: string): boolean {
-  return existsSync(join(dir, ".git"));
+interface RawStatus {
+  root_fallback?: unknown;
 }
 
 /**
- * Recomputes the `ctxloom.notGitRoot` context key that gates the amber warning
- * button in the Sessions, Plans, and Tasks title bars. False (no warning) when no
- * folder is open — the empty-state is handled elsewhere.
+ * Recomputes the `ctxloom.rootFallback` context key that gates the amber warning
+ * button in the Sessions / Plans / Tasks title bars. The fallback state is read
+ * from the backend's `manage status --format json` (projectroot.RootFromFallback)
+ * — the single source of truth, shared with `ctxloom run`, so the extension never
+ * re-derives "is this a project root" with its own filesystem checks. Best-effort:
+ * no folder open, or a failed query, clears the warning rather than guessing.
  */
-function updateGitRootWarning(): void {
-  const dir = workspaceDir();
-  const notGitRoot = dir !== undefined && !isGitRoot(dir);
-  void vscode.commands.executeCommand("setContext", "ctxloom.notGitRoot", notGitRoot);
+async function updateRootWarning(): Promise<void> {
+  let fallback = false;
+  if (workspaceDir() !== undefined) {
+    try {
+      const { stdout } = await exec(["manage", "status", "--format", "json"]);
+      const raw: RawStatus = JSON.parse(stdout);
+      fallback = raw.root_fallback === true;
+    } catch {
+      fallback = false;
+    }
+  }
+  void vscode.commands.executeCommand("setContext", "ctxloom.rootFallback", fallback);
 }
 
 /**
- * Registers the shared not-a-Git-root warning used by all three top-level views:
- * the `ctxloom.gitWarning` command (a toast with the full explanation) plus the
- * context-key computation, kept fresh as the workspace folders change. The views
- * themselves stay decoupled — they only contribute the amber title-bar button,
- * gated on the `ctxloom.notGitRoot` context key.
+ * Registers the shared project-root-fallback warning used by all three top-level
+ * views: the `ctxloom.gitWarning` command (a toast with the full explanation)
+ * plus the context-key computation, kept fresh as the workspace folders change.
+ * The views stay decoupled — they only contribute the amber title-bar button,
+ * gated on the `ctxloom.rootFallback` context key.
  */
 export function registerGitWarning(context: vscode.ExtensionContext): void {
-  updateGitRootWarning();
+  void updateRootWarning();
   context.subscriptions.push(
     vscode.commands.registerCommand("ctxloom.gitWarning", () => {
-      void vscode.window.showWarningMessage(`ctxloom: ${GIT_ROOT_WARNING}`);
+      void vscode.window.showWarningMessage(`ctxloom: ${ROOT_FALLBACK_WARNING}`);
     }),
-    vscode.workspace.onDidChangeWorkspaceFolders(() => updateGitRootWarning()),
+    vscode.workspace.onDidChangeWorkspaceFolders(() => void updateRootWarning()),
   );
 }
