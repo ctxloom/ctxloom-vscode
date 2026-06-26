@@ -15,6 +15,20 @@ out/**
 .vscode-test.mjs
 test-fixtures/**
 
+# Local working state / agent harness — never part of the published extension.
+# These are this checkout's own ctxloom/agent config + cache, not extension code.
+.ctxloom/**
+.claude/**
+.agents/**
+.codex/**
+.gemini/**
+.ltk/**
+.mcp.json
+.mcp.json.ctxloom.bak
+VERSION
+.versionator.yaml
+*.vsix
+
 # Icon kit: keep the marks the extension references, drop the design-kit extras
 # (embedded-font woff2, browser preview, unused raster sizes) from the .vsix.
 # They stay in the repo as the source of truth.
