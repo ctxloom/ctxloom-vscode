@@ -44,9 +44,15 @@ describe("activation & contributions", () => {
   it("contributes the ctxloom view container and all views", () => {
     const pkg = extension().packageJSON;
     const views: string[] = (pkg.contributes.views.ctxloom as ContributedView[]).map((v) => v.id);
-    // Top-level views, plus the composite Config view that nests Profiles /
-    // Fragments / Prompts / Remotes / ltk.
-    const expected = ["ctxloom.sessions", "ctxloom.plans", "ctxloom.tasks", "ctxloom.config"];
+    // Top-level views (Profiles floated to the top), plus the composite Config
+    // view that nests Fragments / Prompts / Remotes / ltk.
+    const expected = [
+      "ctxloom.profiles",
+      "ctxloom.sessions",
+      "ctxloom.plans",
+      "ctxloom.tasks",
+      "ctxloom.config",
+    ];
     for (const id of expected) {
       assert.ok(views.includes(id), `missing view: ${id}`);
     }

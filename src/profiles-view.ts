@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { ChatSession } from "./chat";
 import { exec, listProfiles, runInTerminal } from "./cli";
 import { createProfile } from "./profile-data";
 import { ProfileComposer } from "./profile-composer";
@@ -10,7 +11,8 @@ import { requireItem } from "./view-util";
  * full `name` (the value passed to `ctxloom run -p` and the profile subcommands)
  * separately from its backend-supplied `displayName`, so the item-context
  * commands act on the exact reference even when a remote profile shows a short
- * label.
+ * label. A filled star marks the project's configured default so the state is
+ * visible at a glance and visibly moves when the default changes.
  */
 class ProfileItem extends vscode.TreeItem {
   constructor(readonly profile: Profile) {
@@ -18,6 +20,7 @@ class ProfileItem extends vscode.TreeItem {
     this.description = profile.isDefault ? "default" : undefined;
     this.tooltip = profile.description;
     this.contextValue = "ctxloomProfile";
+    this.iconPath = new vscode.ThemeIcon(profile.isDefault ? "star-full" : "library");
     // Clicking a profile opens the composer for it.
     this.command = {
       command: "ctxloom.profiles.compose",
@@ -28,10 +31,11 @@ class ProfileItem extends vscode.TreeItem {
 }
 
 /**
- * The Profiles tree in the ctxloom Activity Bar container. Lists one row per
- * profile from `profile list --format json` (via the cli.ts seam), marking the
- * configured default and exposing set-default / edit / create actions. A thin
- * frontend: all profile logic lives in the CLI and parsing in profiles.ts.
+ * The Profiles tree: a top-level row in the ctxloom Activity Bar container, one
+ * row per profile from `profile list --format json` (via the cli.ts seam),
+ * marking the configured default and exposing open-chat / set-default / compose /
+ * edit / create actions. A thin frontend: all profile logic lives in the CLI and
+ * parsing in profiles.ts.
  */
 export class ProfilesProvider implements vscode.TreeDataProvider<ProfileItem> {
   private readonly changed = new vscode.EventEmitter<void>();
@@ -47,33 +51,49 @@ export class ProfilesProvider implements vscode.TreeDataProvider<ProfileItem> {
   }
 
   async getChildren(): Promise<ProfileItem[]> {
-    const profiles = await listProfiles();
+    let profiles: Profile[];
+    try {
+      profiles = await listProfiles();
+    } catch (err) {
+      void vscode.window.showErrorMessage(
+        `ctxloom: could not list profiles: ${String(err)}`,
+      );
+      return [];
+    }
     return profiles.map((profile) => new ProfileItem(profile));
   }
 }
 
 /**
- * Registers the Profiles commands: refresh, set-default (`profile default
- * <name>` then refresh), edit (`profile edit <name>` in a terminal, since it
- * opens an editor), and create (`profile create` in a terminal, since it prompts
- * interactively). The Profiles tree itself is hosted inside the composite Config
- * view (config-view.ts), so `refresh` repaints that view rather than a
- * standalone one.
+ * Registers the standalone Profiles tree and its commands: open-chat (launch a
+ * chat running the profile), set-default (make this the sole default), compose
+ * (the profile composer), edit (`profile edit` in a terminal, since it opens an
+ * editor), create, and refresh. Mutating actions repaint the view when they
+ * finish.
  */
-export function registerProfilesCommands(
-  context: vscode.ExtensionContext,
-  refresh: () => void,
-): void {
+export function registerProfilesView(context: vscode.ExtensionContext): void {
+  const provider = new ProfilesProvider();
+  const refresh = (): void => provider.refresh();
   context.subscriptions.push(
-    vscode.commands.registerCommand("ctxloom.profiles.refresh", () => refresh()),
+    vscode.window.registerTreeDataProvider("ctxloom.profiles", provider),
+    vscode.commands.registerCommand("ctxloom.profiles.refresh", refresh),
+    vscode.commands.registerCommand(
+      "ctxloom.profiles.openChat",
+      (item: ProfileItem) => {
+        if (requireItem(item)) {
+          ChatSession.open(context, {
+            name: item.profile.name,
+            label: item.profile.displayName,
+          });
+        }
+      },
+    ),
     vscode.commands.registerCommand(
       "ctxloom.profiles.setDefault",
-      async (item: ProfileItem) => {
-        if (!requireItem(item)) {
-          return;
+      (item: ProfileItem) => {
+        if (requireItem(item)) {
+          void setDefault(item.profile, refresh);
         }
-        await exec(["profile", "default", item.profile.name]);
-        refresh();
       },
     ),
     vscode.commands.registerCommand("ctxloom.profiles.edit", (item: ProfileItem) => {
@@ -90,6 +110,33 @@ export function registerProfilesCommands(
       void createAndCompose(context, refresh),
     ),
   );
+}
+
+/**
+ * Makes `target` the project's sole default profile. The backend default is a
+ * list (multiple defaults may coexist), but the GUI action means "make this THE
+ * default", so any other current defaults are unset first — otherwise the star
+ * would appear to stick on the old profile. A no-op if it is already the only
+ * default.
+ */
+async function setDefault(target: Profile, refresh: () => void): Promise<void> {
+  try {
+    const profiles = await listProfiles();
+    for (const p of profiles) {
+      if (p.isDefault && p.name !== target.name) {
+        await exec(["profile", "default", "--unset", p.name]);
+      }
+    }
+    if (!target.isDefault) {
+      await exec(["profile", "default", target.name]);
+    }
+  } catch (err) {
+    void vscode.window.showErrorMessage(
+      `ctxloom: could not set ${target.displayName} as default: ${String(err)}`,
+    );
+    return;
+  }
+  refresh();
 }
 
 /**

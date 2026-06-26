@@ -2,13 +2,12 @@ import * as vscode from "vscode";
 import { registerContentActions } from "./content-actions";
 import { FragmentsProvider, registerFragmentsCommands } from "./fragments-view";
 import { LtkProvider, registerLtkCommands } from "./ltk-view";
-import { ProfilesProvider, registerProfilesCommands } from "./profiles-view";
 import { PromptsProvider, registerPromptsCommands } from "./prompts-view";
 import { RemotesProvider, registerRemotesCommands } from "./remotes-view";
 
-// The Config view folds the lower-traffic management trees — Profiles, Fragments,
-// Prompts, Remotes, ltk — under one collapsible Activity Bar section, so the
-// sidebar's top level stays Sessions / Plans / Tasks. Each domain keeps its own
+// The Config view folds the lower-traffic management trees — Fragments, Prompts,
+// Remotes, ltk — under one collapsible Activity Bar section, so the sidebar's top
+// level stays Profiles / Sessions / Plans / Tasks. Each domain keeps its own
 // provider and commands; this view just composes them.
 
 /**
@@ -89,12 +88,6 @@ export function registerConfigView(context: vscode.ExtensionContext): void {
   const ltkIcon = vscode.Uri.joinPath(context.extensionUri, "media/icons/ltk/ltk-mono.svg");
   const config = new ConfigProvider([
     {
-      label: "Profiles",
-      icon: new vscode.ThemeIcon("library"),
-      contextValue: "ctxloomConfigProfiles",
-      provider: new ProfilesProvider(),
-    },
-    {
       label: "Fragments",
       icon: new vscode.ThemeIcon("note"),
       contextValue: "ctxloomConfigFragments",
@@ -126,7 +119,6 @@ export function registerConfigView(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("ctxloom.config.refresh", refresh),
   );
   registerContentActions(context);
-  registerProfilesCommands(context, refresh);
   registerFragmentsCommands(context, refresh);
   registerPromptsCommands(context, refresh);
   registerRemotesCommands(context, refresh);

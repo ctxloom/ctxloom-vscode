@@ -49,10 +49,21 @@ type FromWebview =
 export class ChatSession {
   private static current: ChatSession | undefined;
 
-  /** Opens the chat panel, or reveals it if one already exists. */
-  static open(context: vscode.ExtensionContext): void {
+  /**
+   * Opens the chat panel, or reveals it if one already exists. An optional
+   * profile (e.g. launched from the Profiles view) seeds a new panel with that
+   * profile, or — if a panel is already open — switches it to that profile,
+   * which starts a fresh session by design.
+   */
+  static open(
+    context: vscode.ExtensionContext,
+    profile?: { name: string; label: string },
+  ): void {
     if (ChatSession.current) {
       ChatSession.current.panel.reveal(vscode.ViewColumn.Beside);
+      if (profile) {
+        ChatSession.current.switchProfile(profile.name, profile.label);
+      }
       return;
     }
     if (!workspaceDir()) {
@@ -61,7 +72,7 @@ export class ChatSession {
       );
       return;
     }
-    ChatSession.current = new ChatSession(context);
+    ChatSession.current = new ChatSession(context, profile);
   }
 
   private readonly panel: vscode.WebviewPanel;
@@ -94,10 +105,17 @@ export class ChatSession {
     this.proc?.stdin.write(line + "\n");
   });
 
-  private constructor(context: vscode.ExtensionContext) {
+  private constructor(
+    context: vscode.ExtensionContext,
+    profile?: { name: string; label: string },
+  ) {
+    // A profile passed in (launched from the Profiles view) wins; otherwise fall
+    // back to the ctxloom.runProfile setting, and finally to the project default.
     this.activeProfile =
-      vscode.workspace.getConfiguration("ctxloom").get<string>("runProfile") ?? "";
-    this.activeProfileLabel = this.activeProfile || "default";
+      profile?.name ??
+      vscode.workspace.getConfiguration("ctxloom").get<string>("runProfile") ??
+      "";
+    this.activeProfileLabel = profile?.label || this.activeProfile || "default";
     this.panel = vscode.window.createWebviewPanel(
       "ctxloom.chat",
       "ctxloom chat",
@@ -309,8 +327,17 @@ export class ChatSession {
     if (!pick) {
       return;
     }
-    this.activeProfile = pick.profileName;
-    this.activeProfileLabel = pick.profileLabel;
+    this.switchProfile(pick.profileName, pick.profileLabel);
+  }
+
+  /**
+   * Switches the panel to a different profile and restarts its backend on a fresh
+   * session. Switching profile is a new session by design — the assembled context
+   * differs, so continuing the old transcript would be incoherent.
+   */
+  private switchProfile(name: string, label: string): void {
+    this.activeProfile = name;
+    this.activeProfileLabel = label;
     this.restart({ newSession: true });
   }
 
