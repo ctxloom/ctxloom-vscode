@@ -136,6 +136,25 @@ describe("buildRunArgs", () => {
       buildRunArgs({ structured: true, profile: "ts-dev", newSession: true }),
     ).toEqual(["run", "--structured", "--format", "json", "-p", "ts-dev", "--new-session"]);
   });
+
+  it("resumes a session with --session", () => {
+    expect(buildRunArgs({ structured: true, session: "  swift-amber-falcon  " })).toEqual([
+      "run",
+      "--structured",
+      "--format",
+      "json",
+      "--session",
+      "swift-amber-falcon",
+    ]);
+  });
+
+  it("prefers --session over --new-session when both are set", () => {
+    expect(buildRunArgs({ session: "swift-amber-falcon", newSession: true })).toEqual([
+      "run",
+      "--session",
+      "swift-amber-falcon",
+    ]);
+  });
 });
 
 describe("formatToolInput", () => {

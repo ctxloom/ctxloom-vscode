@@ -177,12 +177,15 @@ export interface RunArgsOptions {
   profile?: string;
   /** Start a fresh session instead of resuming. */
   newSession?: boolean;
+  /** Resume the named harp session (--session); takes precedence over newSession. */
+  session?: string;
 }
 
 /**
  * Builds the argv for `ctxloom run`, the single source of truth shared by the
  * chat panel and the terminal run command so the -p / structured flags don't
- * drift between them.
+ * drift between them. `--session` and `--new-session` are mutually exclusive, so
+ * a session (resume) wins when both are somehow set.
  */
 export function buildRunArgs(opts: RunArgsOptions): string[] {
   const args = ["run"];
@@ -193,7 +196,10 @@ export function buildRunArgs(opts: RunArgsOptions): string[] {
   if (profile) {
     args.push("-p", profile);
   }
-  if (opts.newSession) {
+  const session = opts.session?.trim();
+  if (session) {
+    args.push("--session", session);
+  } else if (opts.newSession) {
     args.push("--new-session");
   }
   return args;

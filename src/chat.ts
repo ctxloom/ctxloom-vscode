@@ -75,6 +75,26 @@ export class ChatSession {
     ChatSession.current = new ChatSession(context, profile);
   }
 
+  /**
+   * Opens the chat resumed on a specific session (essence + tasks), or switches
+   * the already-open panel to it. This is what the Sessions/Plans "resume" action
+   * uses, so resuming lands in the interactive chat rather than a terminal.
+   */
+  static resume(context: vscode.ExtensionContext, harp: string): void {
+    if (ChatSession.current) {
+      ChatSession.current.panel.reveal(vscode.ViewColumn.Beside);
+      ChatSession.current.resumeSession(harp);
+      return;
+    }
+    if (!workspaceDir()) {
+      void vscode.window.showErrorMessage(
+        "ctxloom: open a folder before starting a chat.",
+      );
+      return;
+    }
+    ChatSession.current = new ChatSession(context, undefined, harp);
+  }
+
   private readonly panel: vscode.WebviewPanel;
   private proc: ChildProcessWithoutNullStreams | undefined;
   private stdoutBuf = "";
@@ -86,6 +106,10 @@ export class ChatSession {
   // Falls back to the raw profile string (or "default") before a pick resolves
   // it; the picker sets it from the profile's displayName.
   private activeProfileLabel: string;
+  // When set, the next start resumes this harp session (--session) instead of the
+  // default. Cleared once a fresh session is started (New Session / profile
+  // switch), since the original resume target no longer applies.
+  private resumeHarp: string | undefined;
   // When set, the current backend's exit should respawn a fresh session instead
   // of reporting "session ended" — used by the profile picker and New Session.
   private pendingRestart: { newSession: boolean } | undefined;
@@ -108,6 +132,7 @@ export class ChatSession {
   private constructor(
     context: vscode.ExtensionContext,
     profile?: { name: string; label: string },
+    resumeHarp?: string,
   ) {
     // A profile passed in (launched from the Profiles view) wins; otherwise fall
     // back to the ctxloom.runProfile setting, and finally to the project default.
@@ -116,6 +141,7 @@ export class ChatSession {
       vscode.workspace.getConfiguration("ctxloom").get<string>("runProfile") ??
       "";
     this.activeProfileLabel = profile?.label || this.activeProfile || "default";
+    this.resumeHarp = resumeHarp;
     this.panel = vscode.window.createWebviewPanel(
       "ctxloom.chat",
       "ctxloom chat",
@@ -136,10 +162,15 @@ export class ChatSession {
 
   /** Spawns the structured run and wires its streams to the webview. */
   private start(opts: { newSession?: boolean } = {}): void {
+    // Starting fresh supersedes any pending resume target.
+    if (opts.newSession) {
+      this.resumeHarp = undefined;
+    }
     const args = buildRunArgs({
       structured: true,
       profile: this.activeProfile,
       newSession: opts.newSession,
+      session: this.resumeHarp,
     });
     this.post({ kind: "profile", label: this.activeProfileLabel });
 
@@ -339,6 +370,15 @@ export class ChatSession {
     this.activeProfile = name;
     this.activeProfileLabel = label;
     this.restart({ newSession: true });
+  }
+
+  /**
+   * Switches the open panel to resume a different session on a fresh backend.
+   * Not a new session — the backend rehydrates the named harp's essence + tasks.
+   */
+  private resumeSession(harp: string): void {
+    this.resumeHarp = harp;
+    this.restart({ newSession: false });
   }
 
   /**
