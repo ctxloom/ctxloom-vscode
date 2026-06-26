@@ -13,6 +13,7 @@
     "Other"
   ],
   "main": "./dist/extension.js",
+  "icon": "media/icons/ctxloom/png/ctxloom-128.png",
   "activationEvents": [
     "onStartupFinished"
   ],
@@ -20,17 +21,466 @@
     "commands": [
       {
         "command": "ctxloom.run",
-        "title": "ctxloom: Run Agent"
+        "title": "Run Agent",
+        "category": "ctxloom"
       },
       {
         "command": "ctxloom.openChat",
-        "title": "ctxloom: Open Chat"
+        "title": "Open Chat",
+        "category": "ctxloom",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "ctxloom.selectChatProfile",
+        "title": "Select Chat Profile",
+        "category": "ctxloom",
+        "icon": "$(list-selection)"
+      },
+      {
+        "command": "ctxloom.newChatSession",
+        "title": "New Chat Session",
+        "category": "ctxloom",
+        "icon": "$(add)"
+      },
+      {
+        "command": "ctxloom.openSettings",
+        "title": "Settings",
+        "category": "ctxloom",
+        "icon": "$(gear)"
       },
       {
         "command": "ctxloom.checkCompanions",
-        "title": "ctxloom: Check Companions (taskloom, ltk)"
+        "title": "Check Companions (taskloom, ltk)",
+        "category": "ctxloom"
+      },
+      {
+        "command": "ctxloom.sessions.refresh",
+        "title": "Refresh Sessions",
+        "category": "ctxloom",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "ctxloom.sessions.resume",
+        "title": "Resume Session",
+        "category": "ctxloom",
+        "icon": "$(play)"
+      },
+      {
+        "command": "ctxloom.sessions.distill",
+        "title": "Distill Session",
+        "category": "ctxloom"
+      },
+      {
+        "command": "ctxloom.sessions.rename",
+        "title": "Rename Session",
+        "category": "ctxloom"
+      },
+      {
+        "command": "ctxloom.sessions.forget",
+        "title": "Forget Session",
+        "category": "ctxloom"
+      },
+      {
+        "command": "ctxloom.plans.refresh",
+        "title": "Refresh Plans",
+        "category": "ctxloom",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "ctxloom.plans.open",
+        "title": "Open Plan",
+        "category": "ctxloom"
+      },
+      {
+        "command": "ctxloom.plans.resume",
+        "title": "Resume Plan Session",
+        "category": "ctxloom",
+        "icon": "$(play)"
+      },
+      {
+        "command": "ctxloom.fragments.refresh",
+        "title": "Refresh Fragments",
+        "category": "ctxloom",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "ctxloom.fragments.open",
+        "title": "Open Fragment",
+        "category": "ctxloom",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "ctxloom.prompts.refresh",
+        "title": "Refresh Prompts",
+        "category": "ctxloom",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "ctxloom.prompts.open",
+        "title": "Open Prompt",
+        "category": "ctxloom",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "ctxloom.profiles.refresh",
+        "title": "Refresh Profiles",
+        "category": "ctxloom",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "ctxloom.profiles.setDefault",
+        "title": "Set as Default Profile",
+        "category": "ctxloom",
+        "icon": "$(star)"
+      },
+      {
+        "command": "ctxloom.profiles.edit",
+        "title": "Edit Profile",
+        "category": "ctxloom",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "ctxloom.profiles.create",
+        "title": "Create Profile",
+        "category": "ctxloom",
+        "icon": "$(add)"
+      },
+      {
+        "command": "ctxloom.profiles.compose",
+        "title": "Compose Profile",
+        "category": "ctxloom",
+        "icon": "$(tools)"
+      },
+      {
+        "command": "ctxloom.tasks.refresh",
+        "title": "Refresh Tasks",
+        "category": "ctxloom",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "ctxloom.tasks.add",
+        "title": "Add Task",
+        "category": "ctxloom",
+        "icon": "$(add)"
+      },
+      {
+        "command": "ctxloom.tasks.setStatus",
+        "title": "Set Task Status",
+        "category": "ctxloom",
+        "icon": "$(checklist)"
+      },
+      {
+        "command": "ctxloom.tasks.edit",
+        "title": "Edit Task",
+        "category": "ctxloom",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "ctxloom.remotes.refresh",
+        "title": "Refresh Remotes",
+        "category": "ctxloom",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "ctxloom.remotes.add",
+        "title": "Add Remote",
+        "category": "ctxloom",
+        "icon": "$(add)"
+      },
+      {
+        "command": "ctxloom.remotes.pull",
+        "title": "Pull Remote Dependencies",
+        "category": "ctxloom",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "ctxloom.remotes.trust",
+        "title": "Trust Remote",
+        "category": "ctxloom",
+        "icon": "$(shield)"
+      },
+      {
+        "command": "ctxloom.ltk.openConfig",
+        "title": "Open ltk Config",
+        "category": "ctxloom",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "ctxloom.ltk.test",
+        "title": "Test Command Against ltk",
+        "category": "ctxloom",
+        "icon": "$(beaker)"
+      },
+      {
+        "command": "ctxloom.ltk.refresh",
+        "title": "Refresh ltk",
+        "category": "ctxloom",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "ctxloom.config.refresh",
+        "title": "Refresh Config",
+        "category": "ctxloom",
+        "icon": "$(refresh)"
       }
     ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "ctxloom",
+          "title": "ctxloom",
+          "icon": "media/icons/ctxloom/ctxloom-mono.svg"
+        }
+      ]
+    },
+    "views": {
+      "ctxloom": [
+        {
+          "id": "ctxloom.sessions",
+          "name": "Sessions"
+        },
+        {
+          "id": "ctxloom.plans",
+          "name": "Plans"
+        },
+        {
+          "id": "ctxloom.tasks",
+          "name": "Tasks",
+          "icon": "media/icons/taskloom/taskloom-mono.svg"
+        },
+        {
+          "id": "ctxloom.config",
+          "name": "Config"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "ctxloom.sessions",
+        "contents": "No sessions yet — start a chat to create one.\n[Open Chat](command:ctxloom.openChat)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "ctxloom.openChat",
+        "key": "ctrl+escape",
+        "mac": "cmd+escape"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "ctxloom.openChat",
+          "when": "view == ctxloom.sessions",
+          "group": "navigation@1"
+        },
+        {
+          "command": "ctxloom.openSettings",
+          "when": "view == ctxloom.sessions",
+          "group": "navigation@2"
+        },
+        {
+          "command": "ctxloom.sessions.refresh",
+          "when": "view == ctxloom.sessions",
+          "group": "navigation@3"
+        },
+        {
+          "command": "ctxloom.plans.refresh",
+          "when": "view == ctxloom.plans",
+          "group": "navigation@1"
+        },
+        {
+          "command": "ctxloom.tasks.add",
+          "when": "view == ctxloom.tasks",
+          "group": "navigation@1"
+        },
+        {
+          "command": "ctxloom.tasks.refresh",
+          "when": "view == ctxloom.tasks",
+          "group": "navigation@2"
+        },
+        {
+          "command": "ctxloom.config.refresh",
+          "when": "view == ctxloom.config",
+          "group": "navigation@1"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "ctxloom.sessions.resume",
+          "when": "view == ctxloom.sessions && viewItem == ctxloomSession",
+          "group": "inline@1"
+        },
+        {
+          "command": "ctxloom.sessions.distill",
+          "when": "view == ctxloom.sessions && viewItem == ctxloomSession",
+          "group": "1_session@1"
+        },
+        {
+          "command": "ctxloom.sessions.rename",
+          "when": "view == ctxloom.sessions && viewItem == ctxloomSession",
+          "group": "1_session@2"
+        },
+        {
+          "command": "ctxloom.sessions.forget",
+          "when": "view == ctxloom.sessions && viewItem == ctxloomSession",
+          "group": "1_session@3"
+        },
+        {
+          "command": "ctxloom.plans.resume",
+          "when": "view == ctxloom.plans && viewItem == ctxloomPlan",
+          "group": "inline@1"
+        },
+        {
+          "command": "ctxloom.tasks.setStatus",
+          "when": "view == ctxloom.tasks && viewItem == ctxloomTask",
+          "group": "inline@1"
+        },
+        {
+          "command": "ctxloom.tasks.edit",
+          "when": "view == ctxloom.tasks && viewItem == ctxloomTask",
+          "group": "inline@2"
+        },
+        {
+          "command": "ctxloom.profiles.create",
+          "when": "view == ctxloom.config && viewItem == ctxloomConfigProfiles",
+          "group": "inline@1"
+        },
+        {
+          "command": "ctxloom.remotes.add",
+          "when": "view == ctxloom.config && viewItem == ctxloomConfigRemotes",
+          "group": "inline@1"
+        },
+        {
+          "command": "ctxloom.remotes.pull",
+          "when": "view == ctxloom.config && viewItem == ctxloomConfigRemotes",
+          "group": "inline@2"
+        },
+        {
+          "command": "ctxloom.ltk.openConfig",
+          "when": "view == ctxloom.config && viewItem == ctxloomConfigLtk",
+          "group": "inline@1"
+        },
+        {
+          "command": "ctxloom.ltk.test",
+          "when": "view == ctxloom.config && viewItem == ctxloomConfigLtk",
+          "group": "1_ltk@1"
+        },
+        {
+          "command": "ctxloom.profiles.compose",
+          "when": "view == ctxloom.config && viewItem == ctxloomProfile",
+          "group": "inline@1"
+        },
+        {
+          "command": "ctxloom.profiles.setDefault",
+          "when": "view == ctxloom.config && viewItem == ctxloomProfile",
+          "group": "inline@2"
+        },
+        {
+          "command": "ctxloom.profiles.edit",
+          "when": "view == ctxloom.config && viewItem == ctxloomProfile",
+          "group": "1_profile@1"
+        },
+        {
+          "command": "ctxloom.fragments.open",
+          "when": "view == ctxloom.config && viewItem == ctxloomFragment",
+          "group": "inline@1"
+        },
+        {
+          "command": "ctxloom.prompts.open",
+          "when": "view == ctxloom.config && viewItem == ctxloomPrompt",
+          "group": "inline@1"
+        },
+        {
+          "command": "ctxloom.remotes.trust",
+          "when": "view == ctxloom.config && viewItem == ctxloomRemoteUntrusted",
+          "group": "inline@1"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "ctxloom.openChat",
+          "when": "editorIsOpen && activeWebviewPanelId != 'ctxloom.chat'",
+          "group": "navigation@0"
+        },
+        {
+          "command": "ctxloom.newChatSession",
+          "when": "activeWebviewPanelId == 'ctxloom.chat'",
+          "group": "navigation@1"
+        },
+        {
+          "command": "ctxloom.selectChatProfile",
+          "when": "activeWebviewPanelId == 'ctxloom.chat'",
+          "group": "navigation@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "ctxloom.openSettings",
+          "when": "false"
+        },
+        {
+          "command": "ctxloom.profiles.setDefault",
+          "when": "false"
+        },
+        {
+          "command": "ctxloom.profiles.edit",
+          "when": "false"
+        },
+        {
+          "command": "ctxloom.profiles.compose",
+          "when": "false"
+        },
+        {
+          "command": "ctxloom.tasks.setStatus",
+          "when": "false"
+        },
+        {
+          "command": "ctxloom.tasks.edit",
+          "when": "false"
+        },
+        {
+          "command": "ctxloom.remotes.pull",
+          "when": "false"
+        },
+        {
+          "command": "ctxloom.remotes.trust",
+          "when": "false"
+        },
+        {
+          "command": "ctxloom.sessions.resume",
+          "when": "false"
+        },
+        {
+          "command": "ctxloom.sessions.distill",
+          "when": "false"
+        },
+        {
+          "command": "ctxloom.sessions.rename",
+          "when": "false"
+        },
+        {
+          "command": "ctxloom.sessions.forget",
+          "when": "false"
+        },
+        {
+          "command": "ctxloom.plans.open",
+          "when": "false"
+        },
+        {
+          "command": "ctxloom.plans.resume",
+          "when": "false"
+        },
+        {
+          "command": "ctxloom.fragments.open",
+          "when": "false"
+        },
+        {
+          "command": "ctxloom.prompts.open",
+          "when": "false"
+        }
+      ]
+    },
     "configuration": {
       "title": "ctxloom",
       "properties": {
@@ -43,6 +493,16 @@
           "type": "string",
           "default": "",
           "description": "Profile passed to 'ctxloom run' via -p. Empty uses the project's configured default profiles."
+        },
+        "ctxloom.taskloomPath": {
+          "type": "string",
+          "default": "taskloom",
+          "description": "Path to the taskloom binary (the companion task-tracking CLI, separate from ctxloom). Defaults to 'taskloom' on PATH."
+        },
+        "ctxloom.ltkPath": {
+          "type": "string",
+          "default": "ltk",
+          "description": "Path to the ltk binary (the pre-tool hook companion, separate from ctxloom). Defaults to 'ltk' on PATH."
         }
       }
     }
@@ -51,12 +511,22 @@
     "vscode:prepublish": "npm run build",
     "build": "node esbuild.js",
     "watch": "node esbuild.js --watch",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "compile-integration": "tsc -p tsconfig.integration.json",
+    "pretest:integration": "npm run build && npm run compile-integration",
+    "test:integration": "vscode-test"
   },
   "devDependencies": {
+    "@types/mocha": "^10.0.10",
     "@types/node": "^20.x",
     "@types/vscode": "^1.85.0",
+    "@vscode/test-cli": "^0.0.15",
+    "@vscode/test-electron": "^3.0.0",
     "esbuild": "^0.21.0",
-    "typescript": "^5.4.0"
+    "mocha": "^11.7.6",
+    "typescript": "^5.4.0",
+    "vitest": "^4.1.9"
   }
 }

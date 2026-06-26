@@ -3,6 +3,24 @@ src/**
 node_modules/**
 esbuild.js
 tsconfig.json
+tsconfig.integration.json
+vitest.config.ts
 **/*.map
 **/*.ts
 .gitignore
+
+# Integration-test harness (@vscode/test-electron) — never part of the .vsix.
+out/**
+.vscode-test/**
+.vscode-test.mjs
+test-fixtures/**
+
+# Icon kit: keep the marks the extension references, drop the design-kit extras
+# (embedded-font woff2, browser preview, unused raster sizes) from the .vsix.
+# They stay in the repo as the source of truth.
+media/icons/fonts/**
+media/icons/preview.html
+media/icons/**/png/*-16.png
+media/icons/**/png/*-48.png
+media/icons/**/png/*-64.png
+media/icons/**/png/*-512.png
