@@ -2,7 +2,7 @@
   "name": "ctxloom",
   "displayName": "ctxloom",
   "description": "VSCode companion for ctxloom — launch agents, browse sessions, manage context. A frontend to the same ctxloom backend as the CLI.",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "publisher": "ctxloom",
   "private": true,
   "license": "MIT",
