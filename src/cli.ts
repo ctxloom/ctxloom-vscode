@@ -5,6 +5,8 @@ import {
 } from "node:child_process";
 import { promisify } from "node:util";
 import * as vscode from "vscode";
+import { parseProfiles, type Profile } from "./profiles";
+import { setTransport, type ExecResult } from "./transport";
 
 const execFileAsync = promisify(execFile);
 
@@ -27,10 +29,7 @@ export function workspaceDir(): string | undefined {
   return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 }
 
-export interface ExecResult {
-  stdout: string;
-  stderr: string;
-}
+export type { ExecResult } from "./transport";
 
 /**
  * Runs a ctxloom subcommand non-interactively and resolves its output. Use for
@@ -42,6 +41,15 @@ export async function exec(args: string[]): Promise<ExecResult> {
     cwd: workspaceDir(),
   });
   return { stdout, stderr };
+}
+
+/**
+ * Lists the profiles available to `ctxloom run`, parsed from
+ * `profile list --format json`. Used to populate the chat's profile picker.
+ */
+export async function listProfiles(): Promise<Profile[]> {
+  const { stdout } = await exec(["profile", "list", "--format", "json"]);
+  return parseProfiles(stdout);
 }
 
 /**
@@ -81,3 +89,9 @@ function quoteCommand(bin: string, args: string[]): string {
 function quoteArg(arg: string): string {
   return /[^A-Za-z0-9_./:@-]/.test(arg) ? `'${arg.replace(/'/g, "'\\''")}'` : arg;
 }
+
+// Register the CLI as the active backend transport. Importing this module (which
+// the extension host does at activation) wires every transport() caller — the
+// data modules and the chat — to the child-process implementation above. A gRPC
+// build would call setTransport() with its own implementation instead.
+setTransport({ exec, spawnStreaming });

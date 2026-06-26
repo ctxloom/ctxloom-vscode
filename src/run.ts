@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { runInTerminal, workspaceDir } from "./cli";
+import { buildRunArgs } from "./protocol";
 
 /**
  * Launches `ctxloom run` in an integrated terminal. The configured runProfile,
@@ -17,9 +18,5 @@ export function runAgent(): void {
   const profile = vscode.workspace
     .getConfiguration("ctxloom")
     .get<string>("runProfile");
-  const args = ["run"];
-  if (profile && profile.trim() !== "") {
-    args.push("-p", profile.trim());
-  }
-  runInTerminal("ctxloom agent", args);
+  runInTerminal("ctxloom agent", buildRunArgs({ profile }));
 }

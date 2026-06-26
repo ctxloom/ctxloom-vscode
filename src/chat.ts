@@ -2,55 +2,40 @@ import { existsSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import * as vscode from "vscode";
-import { binaryPath, spawnStreaming, workspaceDir } from "./cli";
+import { binaryPath, listProfiles, spawnStreaming, workspaceDir } from "./cli";
+import { renderMarkdown } from "./markdown";
+import {
+  OutboundQueue,
+  buildRunArgs,
+  encodeMessageLine,
+  formatToolInput,
+  lastStderrLine,
+  parseChatEvent,
+  truncate,
+  wantsMarkdown,
+  type ChatEntry,
+  type WebviewEvent,
+} from "./protocol";
 
-// ChatEvent NDJSON shapes — mirror the events emitted by
-// `ctxloom run --structured --format json` (one JSON object per stdout line),
-// discriminated by `type`: "entry" (conversation content), "complete" (a
-// response's completion + accounting), or "session" (one-time session info).
-interface ChatEntry {
-  type?: string;
-  content?: string;
-  toolName?: string;
-  toolInput?: unknown;
-  toolOutput?: string;
-  isError?: boolean;
-}
-interface ChatComplete {
-  inputTokens?: number;
-  outputTokens?: number;
-  cacheReadTokens?: number;
-  cacheCreationTokens?: number;
-  contextWindow?: number;
-  maxOutputTokens?: number;
-  costUsd?: number;
-  model?: string;
-  stopReason?: string;
-  durationMs?: number;
-  numTurns?: number;
-}
-interface ChatSessionInfo {
-  model?: string;
-  permissionMode?: string;
-  contextWindow?: number;
-  mcpServers?: { name?: string; status?: string }[];
-}
-interface ChatEventLine {
-  type?: "entry" | "complete" | "session";
-  entry?: ChatEntry;
-  complete?: ChatComplete;
-  session?: ChatSessionInfo;
-}
+// Tool input/output can be huge (a full file read, a long command output).
+// Cap what the panel renders so one tool turn can't bloat the webview; the
+// terminal run shows the untruncated version.
+const TOOL_TEXT_MAX = 2000;
 
-// Messages the extension posts to the webview.
+// Messages the extension posts to the webview: the parsed NDJSON events, a
+// connection status line, the active profile label, and a reset (clear the log
+// when the session is replaced).
 type ToWebview =
-  | { kind: "entry"; entry: ChatEntry }
-  | { kind: "complete"; complete: ChatComplete }
-  | { kind: "session"; session: ChatSessionInfo }
-  | { kind: "status"; text: string; connected: boolean };
+  | WebviewEvent
+  | { kind: "status"; text: string; connected: boolean }
+  | { kind: "profile"; label: string }
+  | { kind: "reset" };
 
 // Messages the webview posts back.
-type FromWebview = { kind: "send"; text: string };
+type FromWebview =
+  | { kind: "send"; text: string }
+  | { kind: "selectProfile" }
+  | { kind: "newSession" };
 
 /**
  * A live chat session: owns a `ctxloom run --structured --format json`
@@ -82,14 +67,37 @@ export class ChatSession {
   private readonly panel: vscode.WebviewPanel;
   private proc: ChildProcessWithoutNullStreams | undefined;
   private stdoutBuf = "";
+  // The profile the chat launches with. Seeded from the ctxloom.runProfile
+  // setting; the profile picker overrides it for this panel's lifetime. Empty
+  // means "let ctxloom use the project's default profiles".
+  private activeProfile: string;
+  // The backend-supplied display label for activeProfile, shown in the header.
+  // Falls back to the raw profile string (or "default") before a pick resolves
+  // it; the picker sets it from the profile's displayName.
+  private activeProfileLabel: string;
+  // When set, the current backend's exit should respawn a fresh session instead
+  // of reporting "session ended" — used by the profile picker and New Session.
+  private pendingRestart: { newSession: boolean } | undefined;
+  // Serializes stdout-derived events so async markdown rendering can't reorder
+  // turns: each event waits for the previous one's render+post to finish.
+  private renderChain: Promise<void> = Promise.resolve();
   // Rolling tail of the subprocess's stderr. The backend reports real failures
   // here (e.g. "unknown flag: --structured", "warning: watch stream ended"),
   // so on a non-zero/early exit we can show the cause instead of a bare
   // "session ended". Capped so a chatty -vvv run can't grow it unbounded.
   private stderrTail = "";
   private disposed = false;
+  // Outbound messages are never dropped: they are held until the backend's
+  // stdin is writable, then flushed in order. The writer targets whichever
+  // process is current, so a respawn (New Session) just retargets it.
+  private readonly outbox = new OutboundQueue((line) => {
+    this.proc?.stdin.write(line + "\n");
+  });
 
   private constructor(context: vscode.ExtensionContext) {
+    this.activeProfile =
+      vscode.workspace.getConfiguration("ctxloom").get<string>("runProfile") ?? "";
+    this.activeProfileLabel = this.activeProfile || "default";
     this.panel = vscode.window.createWebviewPanel(
       "ctxloom.chat",
       "ctxloom chat",
@@ -109,14 +117,13 @@ export class ChatSession {
   }
 
   /** Spawns the structured run and wires its streams to the webview. */
-  private start(): void {
-    const profile = vscode.workspace
-      .getConfiguration("ctxloom")
-      .get<string>("runProfile");
-    const args = ["run", "--structured", "--format", "json"];
-    if (profile && profile.trim() !== "") {
-      args.push("-p", profile.trim());
-    }
+  private start(opts: { newSession?: boolean } = {}): void {
+    const args = buildRunArgs({
+      structured: true,
+      profile: this.activeProfile,
+      newSession: opts.newSession,
+    });
+    this.post({ kind: "profile", label: this.activeProfileLabel });
 
     // Pre-flight an absolute binaryPath so a wrong/whitespaced path produces a
     // clear, quoted message rather than a bare async ENOENT. A bare name
@@ -143,6 +150,9 @@ export class ChatSession {
       return;
     }
     this.proc = proc;
+    // The pipe accepts writes immediately; flush anything queued before now and
+    // let later sends write through.
+    this.outbox.setWritable(true);
     this.post({ kind: "status", text: "starting agent…", connected: true });
 
     proc.stdout.setEncoding("utf8");
@@ -165,7 +175,21 @@ export class ChatSession {
     );
     proc.on("exit", (code, signal) => {
       this.proc = undefined;
+      // Hold any further sends until a new backend is running, rather than
+      // writing into a dead pipe.
+      this.outbox.setWritable(false);
       if (this.disposed) {
+        return;
+      }
+      // An intentional restart (profile switch / New Session): clear the panel
+      // and spawn a fresh backend instead of reporting the exit as an ending.
+      if (this.pendingRestart) {
+        const restart = this.pendingRestart;
+        this.pendingRestart = undefined;
+        this.stdoutBuf = "";
+        this.stderrTail = "";
+        this.resetPanel();
+        this.start({ newSession: restart.newSession });
         return;
       }
       // Distinguish a clean end from a failure, and attach the backend's last
@@ -177,7 +201,7 @@ export class ChatSession {
           : code === 0
             ? "session ended"
             : `session ended (exit ${code ?? "?"})`;
-      const detail = this.lastStderrLine();
+      const detail = lastStderrLine(this.stderrTail);
       this.post({
         kind: "status",
         text: detail ? `${how} — ${detail}` : how,
@@ -199,43 +223,121 @@ export class ChatSession {
   }
 
   private handleLine(line: string): void {
-    let ev: ChatEventLine;
-    try {
-      ev = JSON.parse(line) as ChatEventLine;
-    } catch {
-      return; // ignore any non-JSON noise that reaches stdout
+    const ev = parseChatEvent(line);
+    if (!ev) {
+      return;
     }
-    if (ev.entry) {
-      this.post({ kind: "entry", entry: ev.entry });
-    } else if (ev.complete) {
-      this.post({ kind: "complete", complete: ev.complete });
-    } else if (ev.session) {
-      this.post({ kind: "session", session: ev.session });
+    if (ev.kind === "entry") {
+      this.enrichToolEntry(ev.entry);
+    }
+    // Render + post through a serial chain so an entry awaiting markdown can't be
+    // overtaken by a later event (a following tool turn, or the completion rule).
+    this.renderChain = this.renderChain.then(async () => {
+      if (ev.kind === "entry" && ev.entry.content && wantsMarkdown(ev.entry.type)) {
+        ev.entry.html = await renderMarkdown(ev.entry.content);
+      }
+      this.post(ev);
+    });
+  }
+
+  /**
+   * Fills a tool entry's display-ready, truncated input/output text so the
+   * webview can show details without re-implementing formatting. Non-tool
+   * entries are left untouched.
+   */
+  private enrichToolEntry(entry: ChatEntry): void {
+    if (entry.type === "tool_use") {
+      const text = formatToolInput(entry.toolInput);
+      if (text) {
+        entry.toolInputText = truncate(text, TOOL_TEXT_MAX);
+      }
+    } else if (entry.type === "tool_result" && entry.toolOutput) {
+      entry.toolOutputText = truncate(entry.toolOutput, TOOL_TEXT_MAX);
     }
   }
 
   private onWebviewMessage(msg: FromWebview): void {
-    if (msg.kind !== "send") {
+    if (msg.kind === "selectProfile") {
+      void this.selectProfile();
       return;
     }
-    if (!this.proc) {
-      this.post({ kind: "status", text: "session ended — reopen chat", connected: false });
+    if (msg.kind === "newSession") {
+      this.restart({ newSession: true });
       return;
     }
-    // One line = one message. Escape backslashes then newlines so a multi-line
-    // compose arrives as a single line the backend decodes back (decodeMessageLine
-    // turns \\ → \ and \n → newline).
-    const wire = msg.text.replace(/\\/g, "\\\\").replace(/\r?\n/g, "\\n");
-    this.proc.stdin.write(wire + "\n");
+    // One line = one message. Queue it: the OutboundQueue delivers it now if the
+    // backend is up, or holds it (in order) until a backend is running again —
+    // so messages typed mid-turn or during a respawn are never lost.
+    this.outbox.enqueue(encodeMessageLine(msg.text));
   }
 
-  /** The most recent non-empty stderr line, for one-line failure context. */
-  private lastStderrLine(): string {
-    const lines = this.stderrTail
-      .split("\n")
-      .map((l) => l.trim())
-      .filter((l) => l !== "");
-    return lines.at(-1) ?? "";
+  /** Opens the profile picker on the active chat panel, if any. */
+  static selectProfile(): void {
+    void ChatSession.current?.selectProfile();
+  }
+
+  /** Starts a fresh session on the active chat panel, if any. */
+  static newSession(): void {
+    ChatSession.current?.restart({ newSession: true });
+  }
+
+  /**
+   * Prompts for a profile and, if one is chosen, restarts the chat on a fresh
+   * backend running it. Switching profile is a new session by design.
+   */
+  private async selectProfile(): Promise<void> {
+    let profiles;
+    try {
+      profiles = await listProfiles();
+    } catch (err) {
+      void vscode.window.showErrorMessage(`ctxloom: could not list profiles: ${String(err)}`);
+      return;
+    }
+    const items = profiles.map((p) => ({
+      label: p.displayName,
+      description: [p.isDefault ? "default" : "", p.isRemote ? "remote" : ""]
+        .filter((s) => s !== "")
+        .join(" · "),
+      detail: p.description,
+      profileName: p.name,
+      profileLabel: p.displayName,
+    }));
+    const pick = await vscode.window.showQuickPick(items, {
+      placeHolder: "Select a profile — starts a new chat session",
+      matchOnDetail: true,
+    });
+    if (!pick) {
+      return;
+    }
+    this.activeProfile = pick.profileName;
+    this.activeProfileLabel = pick.profileLabel;
+    this.restart({ newSession: true });
+  }
+
+  /**
+   * Replaces the current backend with a fresh one. Kills the running process and
+   * lets its exit handler — seeing pendingRestart — clear the panel and respawn,
+   * so there is never more than one live backend at a time.
+   */
+  private restart(opts: { newSession: boolean }): void {
+    this.pendingRestart = opts;
+    if (this.proc) {
+      this.proc.kill();
+    } else {
+      this.pendingRestart = undefined;
+      this.stdoutBuf = "";
+      this.stderrTail = "";
+      this.resetPanel();
+      this.start({ newSession: opts.newSession });
+    }
+  }
+
+  /**
+   * Clears the panel, but only after any in-flight turn renders have posted, so a
+   * late markdown render from the old session can't leak into the fresh one.
+   */
+  private resetPanel(): void {
+    this.renderChain = this.renderChain.then(() => this.post({ kind: "reset" }));
   }
 
   private post(msg: ToWebview): void {
@@ -244,6 +346,7 @@ export class ChatSession {
 
   private dispose(): void {
     this.disposed = true;
+    this.outbox.setWritable(false);
     this.proc?.stdin.end();
     this.proc?.kill();
     this.proc = undefined;
@@ -256,7 +359,11 @@ function chatHtml(): string {
   const nonce = makeNonce();
   const csp = [
     `default-src 'none'`,
+    // Rendered markdown carries its own class-based markup (no inline styles) but
+    // can include images and links; allow https/data images. Scripts stay locked
+    // to the per-load nonce so injected markdown HTML can't execute.
     `style-src 'nonce-${nonce}'`,
+    `img-src https: data:`,
     `script-src 'nonce-${nonce}'`,
   ].join("; ");
 
@@ -281,10 +388,45 @@ function chatHtml(): string {
   .user { background: var(--vscode-textBlockQuote-background); border-left: 3px solid var(--vscode-focusBorder); }
   .assistant { background: var(--vscode-editorWidget-background); }
   .system { opacity: 0.75; font-style: italic; }
+  /* Extended-thinking / reasoning prose: subdued and italic so it reads as
+     secondary to the answer. A future setting will toggle these on/off. */
+  .thinking { opacity: 0.6; font-style: italic; background: transparent; border-left: 3px solid var(--vscode-descriptionForeground, #888); }
   .tool { font-family: var(--vscode-editor-font-family); font-size: 0.9em; opacity: 0.85; }
   .tool.err { color: var(--vscode-errorForeground); }
+  .tool details > summary { cursor: pointer; list-style: revert; }
+  .tool pre.tool-detail {
+    margin: 6px 0 0; padding: 6px 8px;
+    background: var(--vscode-textCodeBlock-background, rgba(128,128,128,0.12));
+    border-radius: 4px; white-space: pre-wrap; word-break: break-word;
+    max-height: 24em; overflow: auto;
+  }
   .role { font-size: 0.75em; text-transform: uppercase; opacity: 0.6; margin-bottom: 2px; }
+  /* Rendered-markdown body: normal whitespace (the markup carries structure) and
+     compact margins so a turn doesn't waste vertical space. */
+  .md { white-space: normal; }
+  .md > :first-child { margin-top: 0; }
+  .md > :last-child { margin-bottom: 0; }
+  .md p { margin: 0.4em 0; }
+  .md ul, .md ol { margin: 0.4em 0; padding-left: 1.4em; }
+  .md a { color: var(--vscode-textLink-foreground); }
+  .md code { font-family: var(--vscode-editor-font-family); font-size: 0.95em; }
+  .md pre {
+    background: var(--vscode-textCodeBlock-background, rgba(128,128,128,0.12));
+    padding: 8px; border-radius: 4px; overflow: auto;
+  }
+  .md pre code { font-size: 0.9em; }
+  .md table { border-collapse: collapse; }
+  .md th, .md td { border: 1px solid var(--vscode-panel-border); padding: 2px 6px; }
+  .time { opacity: 0.6; font-variant-numeric: tabular-nums; margin-left: 6px; }
   .boundary { border-top: 1px solid var(--vscode-panel-border); margin: 12px 0; }
+  #toolbar { display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-bottom: 1px solid var(--vscode-panel-border); }
+  .toolbtn {
+    color: var(--vscode-foreground);
+    background: transparent;
+    border: 1px solid var(--vscode-input-border, var(--vscode-panel-border));
+    border-radius: 4px; padding: 2px 8px; font-size: 0.8em; cursor: pointer;
+  }
+  .toolbtn:hover { background: var(--vscode-toolbar-hoverBackground, rgba(128,128,128,0.2)); }
   #header { padding: 4px 12px; font-size: 0.8em; opacity: 0.8; border-bottom: 1px solid var(--vscode-panel-border); }
   #header:empty { display: none; }
   #meta { padding: 4px 12px; font-size: 0.8em; opacity: 0.7; font-family: var(--vscode-editor-font-family); }
@@ -309,6 +451,10 @@ function chatHtml(): string {
 </style>
 </head>
 <body>
+  <div id="toolbar">
+    <button id="profileBtn" class="toolbtn" title="Switch profile (starts a new session)">Profile: …</button>
+    <button id="newSessionBtn" class="toolbtn" title="Start a fresh session on a new backend">New Session</button>
+  </div>
   <div id="header"></div>
   <div id="log"></div>
   <div id="meta"></div>
@@ -325,26 +471,95 @@ function chatHtml(): string {
   const input = document.getElementById('input');
   const send = document.getElementById('send');
   const status = document.getElementById('status');
+  const profileBtn = document.getElementById('profileBtn');
+  const newSessionBtn = document.getElementById('newSessionBtn');
+
+  profileBtn.addEventListener('click', () => vscode.postMessage({ kind: 'selectProfile' }));
+  newSessionBtn.addEventListener('click', () => vscode.postMessage({ kind: 'newSession' }));
+
+  // Clears the transcript and per-session info when the backend is replaced.
+  function reset() {
+    log.replaceChildren();
+    header.textContent = '';
+    meta.textContent = '';
+  }
 
   function scroll() { log.scrollTop = log.scrollHeight; }
 
-  function addTurn(entry) {
+  function fmtTime(at) {
+    const d = at ? new Date(at) : new Date();
+    return d.toLocaleTimeString();
+  }
+
+  // Appends a dimmed time label to a node; at is the protocol's epoch-ms stamp.
+  function withTime(node, at) {
+    const t = document.createElement('span');
+    t.className = 'time';
+    t.textContent = fmtTime(at);
+    node.appendChild(t);
+  }
+
+  // A tool turn: a one-line summary, plus a collapsible detail pane when the
+  // extension supplied input/output text.
+  function renderTool(div, summaryText, detailText, at, isErr) {
+    div.className = 'turn tool' + (isErr ? ' err' : '');
+    if (detailText) {
+      const det = document.createElement('details');
+      const sum = document.createElement('summary');
+      sum.textContent = summaryText;
+      withTime(sum, at);
+      det.appendChild(sum);
+      const pre = document.createElement('pre');
+      pre.className = 'tool-detail';
+      pre.textContent = detailText;
+      det.appendChild(pre);
+      div.appendChild(det);
+    } else {
+      div.textContent = summaryText;
+      withTime(div, at);
+    }
+  }
+
+  function addTurn(entry, at) {
     const type = entry.type || 'assistant';
     const div = document.createElement('div');
     if (type === 'tool_use') {
-      div.className = 'turn tool';
-      div.textContent = '→ ' + (entry.toolName || 'tool');
+      renderTool(div, '→ ' + (entry.toolName || 'tool'), entry.toolInputText, at, false);
     } else if (type === 'tool_result') {
-      div.className = 'turn tool' + (entry.isError ? ' err' : '');
-      div.textContent = (entry.isError ? '✗ ' : '✓ ') + (entry.toolName || 'tool');
+      renderTool(
+        div,
+        (entry.isError ? '✗ ' : '✓ ') + (entry.toolName || 'tool'),
+        entry.toolOutputText,
+        at,
+        entry.isError,
+      );
+    } else if (type === 'thinking') {
+      // claude-code blanks the reasoning text (see chat_stream.go), so content is
+      // usually empty — show a marker that the model reasoned this turn. Real prose
+      // renders inline if a backend ever provides it. A future setting will toggle
+      // these on/off.
+      div.className = 'turn thinking';
+      div.textContent = entry.content
+        ? '💭 ' + entry.content
+        : '💭 reasoned (thinking hidden by claude-code)';
+      withTime(div, at);
     } else {
       div.className = 'turn ' + type;
       const role = document.createElement('div');
       role.className = 'role';
       role.textContent = type;
+      withTime(role, at);
       div.appendChild(role);
       const body = document.createElement('div');
-      body.textContent = entry.content || '';
+      // entry.html is VS Code's sanitized markdown render; scripts are inert
+      // under the webview CSP. Markdown wants normal whitespace; plain text keeps
+      // the turn's pre-wrap so newlines survive. Fall back to text when absent.
+      if (entry.html) {
+        body.className = 'md';
+        body.innerHTML = entry.html;
+      } else {
+        body.textContent = entry.content || '';
+      }
       div.appendChild(body);
     }
     log.appendChild(div);
@@ -381,9 +596,11 @@ function chatHtml(): string {
 
   window.addEventListener('message', (e) => {
     const msg = e.data;
-    if (msg.kind === 'entry') addTurn(msg.entry);
+    if (msg.kind === 'entry') addTurn(msg.entry, msg.at);
     else if (msg.kind === 'complete') addComplete(msg.complete);
     else if (msg.kind === 'session') setSession(msg.session);
+    else if (msg.kind === 'profile') profileBtn.textContent = 'Profile: ' + msg.label;
+    else if (msg.kind === 'reset') reset();
     else if (msg.kind === 'status') {
       status.textContent = msg.text;
       send.disabled = !msg.connected;
