@@ -1,41 +1,36 @@
 // The Plans tree in the ctxloom Activity Bar container. Plans are owned by
-// taskloom (see plans-data.ts → `taskloom plan list/show`); this view groups
-// them by session harp (top level) with the individual plans as leaves. The
-// resume action launches the plan's session through the cli.ts seam.
+// taskloom (see plans-data.ts → `taskloom plan list/show`); this view lists them
+// flat — one row per plan, labelled with its owning session harp — rather than
+// nesting them under per-session groups. The resume action opens the plan's
+// session in the interactive chat.
 
 import * as vscode from "vscode";
-import { runInTerminal } from "./cli";
+import { ChatSession } from "./chat";
 import { listPlans, showPlan, type Plan } from "./plans-data";
 import { requireItem } from "./view-util";
 
 /**
- * A session-harp group: a collapsible parent whose children are the plans saved
- * in that session. Carries the harp so the resume action can launch its session.
- */
-class SessionGroupItem extends vscode.TreeItem {
-  constructor(readonly harp: string) {
-    super(harp, vscode.TreeItemCollapsibleState.Collapsed);
-    this.contextValue = "ctxloomPlanGroup";
-    this.iconPath = new vscode.ThemeIcon("history");
-  }
-}
-
-/**
- * A single plan leaf. Clicking it opens the markdown file; it carries its path
- * and session harp so the open/resume command handlers can act on the selection.
- * The hover tooltip is filled lazily with the plan's content via `plan show`.
+ * A single plan row. The label is the plan title and the description is its
+ * owning session harp (so the session is visible without nesting). Clicking it
+ * opens the markdown file; it carries its path and harp so the open/resume
+ * command handlers can act on the selection. The hover tooltip is filled lazily
+ * with the plan's content via `plan show`.
  */
 class PlanItem extends vscode.TreeItem {
   readonly path: string;
   readonly harp: string;
 
-  constructor(plan: Plan) {
+  constructor(readonly plan: Plan) {
     super(plan.title, vscode.TreeItemCollapsibleState.None);
     this.path = plan.path;
     this.harp = plan.session;
-    this.description = plan.name;
-    this.tooltip = plan.path;
+    this.description = plan.session;
+    // A useful tooltip up front (title · name · session); resolveTreeItem swaps
+    // in the plan's content on hover. Without this the hover would briefly show
+    // only the file path until the async content loads.
+    this.tooltip = planTooltip(plan);
     this.contextValue = "ctxloomPlan";
+    this.iconPath = new vscode.ThemeIcon("note");
     this.resourceUri = vscode.Uri.file(plan.path);
     this.command = {
       command: "ctxloom.plans.open",
@@ -45,14 +40,28 @@ class PlanItem extends vscode.TreeItem {
   }
 }
 
-type PlanTreeItem = SessionGroupItem | PlanItem;
+/**
+ * The hover for a plan: a header (title · name · session) plus, once loaded, an
+ * excerpt of the plan's content. Kept to an excerpt so a long plan doesn't make
+ * an unwieldy tooltip.
+ */
+function planTooltip(plan: Plan, body?: string): vscode.MarkdownString {
+  const md = new vscode.MarkdownString();
+  md.appendMarkdown(`**${plan.title}**\n\n`);
+  md.appendMarkdown(`\`${plan.name}.plan.md\` · session \`${plan.session}\``);
+  const text = body?.trim();
+  if (text !== undefined && text !== "") {
+    const excerpt = text.length > 1500 ? `${text.slice(0, 1500)}\n\n…` : text;
+    md.appendMarkdown(`\n\n---\n\n${excerpt}`);
+  }
+  return md;
+}
 
 /**
- * Supplies the Plans tree: top-level session-harp groups, each expanding to its
- * plans. The list is read once per getChildren of the root so a refresh
- * re-queries taskloom.
+ * Supplies the Plans tree: a flat list of plans (sorted by session, then title).
+ * The list is re-read on every refresh from `taskloom plan list`.
  */
-class PlansProvider implements vscode.TreeDataProvider<PlanTreeItem> {
+class PlansProvider implements vscode.TreeDataProvider<PlanItem> {
   private readonly changed = new vscode.EventEmitter<void>();
   readonly onDidChangeTreeData = this.changed.event;
 
@@ -61,11 +70,14 @@ class PlansProvider implements vscode.TreeDataProvider<PlanTreeItem> {
     this.changed.fire();
   }
 
-  getTreeItem(element: PlanTreeItem): vscode.TreeItem {
+  getTreeItem(element: PlanItem): vscode.TreeItem {
     return element;
   }
 
-  async getChildren(element?: PlanTreeItem): Promise<PlanTreeItem[]> {
+  async getChildren(element?: PlanItem): Promise<PlanItem[]> {
+    if (element !== undefined) {
+      return []; // flat list — rows have no children
+    }
     let plans: Plan[];
     try {
       plans = await listPlans();
@@ -73,43 +85,30 @@ class PlansProvider implements vscode.TreeDataProvider<PlanTreeItem> {
       void vscode.window.showErrorMessage(`ctxloom: could not list plans: ${String(err)}`);
       return [];
     }
-    if (element === undefined) {
-      return harpsOf(plans).map((harp) => new SessionGroupItem(harp));
-    }
-    if (element instanceof SessionGroupItem) {
-      return plans
-        .filter((p) => p.session === element.harp)
-        .map((p) => new PlanItem(p));
-    }
-    return [];
+    return [...plans]
+      .sort((a, b) => a.session.localeCompare(b.session) || a.title.localeCompare(b.title))
+      .map((plan) => new PlanItem(plan));
   }
 
-  /** Fills a plan leaf's tooltip with its content (markdown) on hover. */
+  /** Fills a plan row's tooltip with its content (markdown) on hover. */
   async resolveTreeItem(
     _item: vscode.TreeItem,
-    element: PlanTreeItem,
+    element: PlanItem,
   ): Promise<vscode.TreeItem> {
-    if (element instanceof PlanItem) {
-      try {
-        element.tooltip = new vscode.MarkdownString(await showPlan(element.path));
-      } catch {
-        // Keep the path tooltip set in the constructor.
-      }
+    try {
+      element.tooltip = planTooltip(element.plan, await showPlan(element.path));
+    } catch {
+      // Keep the title · name · session tooltip set in the constructor.
     }
     return element;
   }
 }
 
-/** The distinct session harps that own at least one plan, in sorted order. */
-function harpsOf(plans: Plan[]): string[] {
-  return [...new Set(plans.map((p) => p.session))].sort();
-}
-
 /**
  * Registers the Plans tree provider and its commands: refresh (re-query
- * taskloom), open (reveal a plan file in the editor) and resume (launch the
- * plan's session via the agent in a terminal). The view id and command ids match
- * the package.json contributions.
+ * taskloom), open (reveal a plan file in the editor) and resume (open the plan's
+ * session in the interactive chat). The view id and command ids match the
+ * package.json contributions.
  */
 export function registerPlansView(context: vscode.ExtensionContext): void {
   const provider = new PlansProvider();
@@ -123,7 +122,7 @@ export function registerPlansView(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand("ctxloom.plans.resume", (item: PlanItem) => {
       if (requireItem(item)) {
-        runInTerminal("ctxloom agent", ["run", "--session", item.harp]);
+        ChatSession.resume(context, item.harp);
       }
     }),
   );

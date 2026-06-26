@@ -1,10 +1,24 @@
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import * as vscode from "vscode";
-import { exec, runInTerminal } from "./cli";
-import { listSessions, sessionEssence, type Session } from "./sessions-data";
-import { requireItem } from "./view-util";
+import { ChatSession } from "./chat";
+import { exec } from "./cli";
+import { listSessions, type Session } from "./sessions-data";
+import { cliError, requireItem } from "./view-util";
 
-/** The shown-on-hover text for a session that hasn't been distilled yet. */
-const NOT_DISTILLED = "Not distilled yet — run Distill";
+/**
+ * Hover for a session with no distilled summary yet — nudges to distill, showing
+ * the distill (clock) icon inline next to the action so it maps to the row's
+ * Distill button. A MarkdownString with supportThemeIcons renders the codicon.
+ */
+function distillHint(): vscode.MarkdownString {
+  const hint = new vscode.MarkdownString(
+    "Not distilled yet — run $(history) Distill to generate a summary",
+  );
+  hint.supportThemeIcons = true;
+  return hint;
+}
 
 /**
  * A tree node for one recorded session. It carries the session's harp name so
@@ -14,15 +28,31 @@ const NOT_DISTILLED = "Not distilled yet — run Distill";
  */
 export class SessionItem extends vscode.TreeItem {
   readonly harpName: string;
+  readonly transcriptPath: string;
+  readonly distilled: boolean;
 
   constructor(session: Session, distilling = false) {
-    super(session.harpName, vscode.TreeItemCollapsibleState.None);
+    // Name is the distilled summary once there is one, else the harp name.
+    super(
+      session.summary !== "" ? session.summary : session.harpName,
+      vscode.TreeItemCollapsibleState.None,
+    );
     this.harpName = session.harpName;
+    this.transcriptPath = session.transcriptPath;
+    this.distilled = session.distilled;
     this.id = session.harpName;
     this.contextValue = "ctxloomSession";
+    // Clicking a session opens its distilled essence (if distilled) or its raw
+    // transcript .jsonl; the raw transcript is always available via right-click.
+    this.command = {
+      command: "ctxloom.sessions.open",
+      title: "Open Session",
+      arguments: [this],
+    };
     if (distilling) {
-      // A spinning ring while `session distill` runs, so the (potentially slow)
-      // distillation is visibly in progress on the row itself.
+      // The standard spinning progress indicator on the row while `session
+      // distill` runs (the inline menu-button icon can't animate), so the
+      // potentially slow distillation is visibly in progress.
       this.description = "distilling…";
       this.iconPath = new vscode.ThemeIcon("loading~spin");
       this.tooltip = "Distilling…";
@@ -30,9 +60,10 @@ export class SessionItem extends vscode.TreeItem {
     }
     this.description = describeTime(session.endedAt || session.startedAt);
     this.iconPath = new vscode.ThemeIcon("comment-discussion");
-    // The full markdown essence is fetched lazily in resolveTreeItem; until then
-    // a plain hint avoids a fetch per row on first render.
-    this.tooltip = NOT_DISTILLED;
+    // Hover shows the summary alone (the harp's name when undistilled is in the
+    // label), or a nudge to distill (with the clock icon) when there's no
+    // summary yet.
+    this.tooltip = session.summary !== "" ? session.summary : distillHint();
   }
 }
 
@@ -80,22 +111,6 @@ export class SessionsProvider implements vscode.TreeDataProvider<SessionItem> {
     }
     return sessions.map((s) => new SessionItem(s, this.distilling.has(s.harpName)));
   }
-
-  /**
-   * Fills the hovered item's tooltip with its distilled essence (rendered as
-   * markdown), or a "not distilled" hint when the session has no essence yet.
-   * Done here so the (potentially slow) `session show` only runs on hover.
-   */
-  async resolveTreeItem(
-    _item: vscode.TreeItem,
-    element: SessionItem,
-  ): Promise<vscode.TreeItem> {
-    const essence = await sessionEssence(element.harpName);
-    element.tooltip = essence
-      ? new vscode.MarkdownString(essence)
-      : NOT_DISTILLED;
-    return element;
-  }
 }
 
 /**
@@ -112,9 +127,28 @@ export function registerSessionsView(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("ctxloom.sessions.refresh", () => {
       provider.refresh();
     }),
+    vscode.commands.registerCommand("ctxloom.sessions.open", (item: SessionItem) => {
+      if (!requireItem(item)) {
+        return;
+      }
+      // Clicking opens the distilled essence when there is one; otherwise the
+      // raw transcript. The raw transcript stays reachable via the right-click
+      // "Open Raw Transcript" item.
+      const essence = essencePath(item.harpName);
+      if (item.distilled && existsSync(essence)) {
+        void vscode.commands.executeCommand("vscode.open", vscode.Uri.file(essence));
+        return;
+      }
+      openRawTranscript(item);
+    }),
+    vscode.commands.registerCommand("ctxloom.sessions.openRaw", (item: SessionItem) => {
+      if (requireItem(item)) {
+        openRawTranscript(item);
+      }
+    }),
     vscode.commands.registerCommand("ctxloom.sessions.resume", (item: SessionItem) => {
       if (requireItem(item)) {
-        runInTerminal("ctxloom agent", ["run", "--session", item.harpName]);
+        ChatSession.resume(context, item.harpName);
       }
     }),
     vscode.commands.registerCommand("ctxloom.sessions.distill", (item: SessionItem) => {
@@ -135,10 +169,27 @@ export function registerSessionsView(context: vscode.ExtensionContext): void {
   );
 }
 
+/** Path to a session's distilled essence under ~/.ctxloom/sessions/<harp>/. */
+function essencePath(harp: string): string {
+  return join(homedir(), ".ctxloom", "sessions", harp, "essence.md");
+}
+
+/** Opens a session's raw transcript .jsonl, or hints when it's not on disk. */
+function openRawTranscript(item: SessionItem): void {
+  if (item.transcriptPath === "" || !existsSync(item.transcriptPath)) {
+    void vscode.window.showInformationMessage(
+      `ctxloom: no transcript on disk for ${item.harpName}.`,
+    );
+    return;
+  }
+  void vscode.commands.executeCommand("vscode.open", vscode.Uri.file(item.transcriptPath));
+}
+
 /**
  * Distills a session, showing progress on its row (a spinning ring) and in the
  * window status bar while `session distill` runs. Clearing the distilling flag
- * repaints the tree, so on success the fresh essence becomes available on hover.
+ * repaints the tree, so on success the fresh essence becomes available on hover
+ * and click; a confirming toast removes the "did it work?" doubt.
  */
 async function distill(provider: SessionsProvider, harp: string): Promise<void> {
   provider.setDistilling(harp, true);
@@ -151,10 +202,12 @@ async function distill(provider: SessionsProvider, harp: string): Promise<void> 
       () => exec(["session", "distill", harp]),
     );
   } catch (err) {
-    void vscode.window.showErrorMessage(`ctxloom: could not distill ${harp}: ${String(err)}`);
+    void vscode.window.showErrorMessage(`ctxloom: could not distill ${harp}: ${cliError(err)}`);
+    return;
   } finally {
     provider.setDistilling(harp, false);
   }
+  void vscode.window.showInformationMessage(`ctxloom: distilled ${harp}.`);
 }
 
 /** Prompts for a new harp name and renames the session, then refreshes. */

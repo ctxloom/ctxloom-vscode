@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { showContent, type ContentKind } from "./content-data";
+import { cliError } from "./view-util";
 
 /** Arguments for the ctxloom.content.open command. */
 export interface OpenContentArgs {
@@ -17,7 +18,17 @@ export async function openContent(ref: string, kind: ContentKind): Promise<void>
   try {
     text = await showContent(ref, kind);
   } catch (err) {
-    void vscode.window.showErrorMessage(`ctxloom: could not open ${ref}: ${String(err)}`);
+    // A fragment/prompt that won't load is almost always a remote bundle that
+    // hasn't been pulled yet — recoverable, so offer the fix rather than treating
+    // it as a dead entry to delete.
+    const pull = "Pull Remotes";
+    const choice = await vscode.window.showWarningMessage(
+      `ctxloom: could not open ${ref}: ${cliError(err)}. It may be a remote that isn't pulled.`,
+      pull,
+    );
+    if (choice === pull) {
+      await vscode.commands.executeCommand("ctxloom.remotes.pull");
+    }
     return;
   }
   const doc = await vscode.workspace.openTextDocument({ content: text, language: "markdown" });

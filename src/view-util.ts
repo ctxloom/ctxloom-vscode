@@ -16,3 +16,23 @@ export function requireItem<T>(item: T | undefined): item is T {
   }
   return true;
 }
+
+/**
+ * A concise message from a failed CLI exec. A child_process rejection wraps the
+ * whole command line plus stderr in `message`; the backend's own error rides
+ * `stderr`, so we prefer its last non-empty line (e.g. "Error: distillation
+ * failed: …") over the noisy wrapper. Falls back to the raw string otherwise.
+ */
+export function cliError(err: unknown): string {
+  if (err !== null && typeof err === "object" && "stderr" in err) {
+    const last = String((err as { stderr: unknown }).stderr)
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line !== "")
+      .at(-1);
+    if (last !== undefined) {
+      return last;
+    }
+  }
+  return String(err);
+}

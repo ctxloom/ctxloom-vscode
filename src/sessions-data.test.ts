@@ -12,6 +12,7 @@ describe("parseSessions", () => {
         started_at: "2026-06-24T15:09:45Z",
         ended_at: "2026-06-24T15:10:14Z",
         transcript_path: "/abs/x.jsonl",
+        summary: "did a thing",
       },
     ]);
     expect(parseSessions(stdout)).toEqual([
@@ -21,6 +22,9 @@ describe("parseSessions", () => {
         backend: "claude-code",
         startedAt: "2026-06-24T15:09:45Z",
         endedAt: "2026-06-24T15:10:14Z",
+        transcriptPath: "/abs/x.jsonl",
+        summary: "did a thing",
+        distilled: true,
       },
     ]);
   });
@@ -44,6 +48,9 @@ describe("parseSessions", () => {
         backend: "",
         startedAt: "",
         endedAt: "",
+        transcriptPath: "",
+        summary: "",
+        distilled: false,
       },
     ]);
   });
@@ -57,6 +64,9 @@ describe("parseSessions", () => {
         backend: "",
         startedAt: "",
         endedAt: "",
+        transcriptPath: "",
+        summary: "",
+        distilled: false,
       },
     ]);
   });

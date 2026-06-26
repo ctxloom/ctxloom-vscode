@@ -11,6 +11,12 @@ export interface Session {
   backend: string;
   startedAt: string;
   endedAt: string;
+  /** Absolute path to the backend transcript .jsonl; "" when the field is absent. */
+  transcriptPath: string;
+  /** The distilled one-line summary, or "" when not distilled. */
+  summary: string;
+  /** True when the session has a saved essence (summary/detail in the listing). */
+  distilled: boolean;
 }
 
 interface RawSession {
@@ -19,6 +25,9 @@ interface RawSession {
   backend?: unknown;
   started_at?: unknown;
   ended_at?: unknown;
+  transcript_path?: unknown;
+  summary?: unknown;
+  detail?: unknown;
 }
 
 /** A string field of an unknown record, or "" when it is absent/non-string. */
@@ -53,12 +62,19 @@ export function parseSessions(stdout: string): Session[] {
       backend: str(raw.backend),
       startedAt: str(raw.started_at),
       endedAt: str(raw.ended_at),
+      transcriptPath: str(raw.transcript_path),
+      summary: str(raw.summary),
+      distilled: str(raw.summary) !== "" || (Array.isArray(raw.detail) && raw.detail.length > 0),
     });
   }
   return sessions;
 }
 
-/** Lists recorded sessions via the cli seam, newest-first as ctxloom emits them. */
+/**
+ * Lists recorded sessions via the cli seam, newest-first as ctxloom emits them.
+ * The backend reconciles the index (dropping sessions whose transcript is gone
+ * and that were never distilled), so the list never contains a dead pointer.
+ */
 export async function listSessions(): Promise<Session[]> {
   const { stdout } = await transport().exec(["session", "list", "--format", "json"]);
   return parseSessions(stdout);

@@ -60,6 +60,17 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "ctxloom.sessions.open",
+        "title": "Open Session",
+        "category": "ctxloom"
+      },
+      {
+        "command": "ctxloom.sessions.openRaw",
+        "title": "Open Raw Transcript (jsonl)",
+        "category": "ctxloom",
+        "icon": "$(json)"
+      },
+      {
         "command": "ctxloom.sessions.resume",
         "title": "Resume Session",
         "category": "ctxloom",
@@ -68,7 +79,8 @@
       {
         "command": "ctxloom.sessions.distill",
         "title": "Distill Session",
-        "category": "ctxloom"
+        "category": "ctxloom",
+        "icon": "$(history)"
       },
       {
         "command": "ctxloom.sessions.rename",
@@ -356,6 +368,16 @@
         {
           "command": "ctxloom.sessions.distill",
           "when": "view == ctxloom.sessions && viewItem == ctxloomSession",
+          "group": "inline@2"
+        },
+        {
+          "command": "ctxloom.sessions.openRaw",
+          "when": "view == ctxloom.sessions && viewItem == ctxloomSession",
+          "group": "0_open@1"
+        },
+        {
+          "command": "ctxloom.sessions.distill",
+          "when": "view == ctxloom.sessions && viewItem == ctxloomSession",
           "group": "1_session@1"
         },
         {
@@ -501,6 +523,14 @@
         },
         {
           "command": "ctxloom.remotes.trust",
+          "when": "false"
+        },
+        {
+          "command": "ctxloom.sessions.open",
+          "when": "false"
+        },
+        {
+          "command": "ctxloom.sessions.openRaw",
           "when": "false"
         },
         {
