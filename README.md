@@ -37,3 +37,7 @@ Session-history tree, plans view, full CLI-parity control plane, and a full
 taskloom task tree land next (they depend on `--json` read output from the
 backend). A native message/chat UI is a later track that needs the backend to
 emit a structured turn stream.
+
+## Licence
+
+Licensed under either of Apache License 2.0 or BSD 3-Clause, at your option: see LICENSE-APACHE and LICENSE-BSD.
